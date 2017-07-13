@@ -1219,6 +1219,10 @@ def _parse_param(blr, bs=None):   # Parse (bytes data with) BLR format
             dtype = 'SQL_TEXT'
             io_length = _bytes_to_int(blr, i+1, 2)
             i += 3
+        elif t == 15:
+            dtype = 'SQL_TEXT'
+            io_length = _bytes_to_int(blr, i+3, 2)
+            i += 5
         elif t == 27:
             dtype = 'SQL_DOUBLE'
             io_length = 8
