@@ -884,7 +884,7 @@ op_names = [
 ]
 
 isc_dpb_names = [
-    None, 'isc_dpb_version1', 'isc_dpb_allocation', 'isc_dpb_journal',
+    None, 'isc_dpb_version1', 'isc_dpb_version2', 'isc_dpb_journal',
     'isc_dpb_page_size', 'isc_dpb_num_buffers', 'isc_dpb_buffer_length',
     'isc_dpb_debug', 'isc_dpb_garbage_collect', 'isc_dpb_verify',
     'isc_dpb_sweep', 'isc_dpb_enable_journal', 'isc_dpb_disable_journal',
@@ -915,6 +915,7 @@ isc_dpb_names = [
     'isc_dpb_remote_protocol', 'isc_dpb_host_name', 'isc_dpb_os_user',
     'isc_dpb_specific_auth_data', 'isc_dpb_auth_plugin_list',
     'isc_dpb_auth_plugin_name', 'isc_dpb_config', 'isc_dpb_nolinger',
+    'isc_dpb_reset_icu', 'isc_dpb_map_attach',
 ]
 
 isc_spb_names = {
@@ -1003,7 +1004,7 @@ isc_info_sql_names = [
     'isc_info_sql_field', 'isc_info_sql_relation', 'isc_info_sql_owner',
     'isc_info_sql_alias', 'isc_info_sql_sqlda_start', 'isc_info_sql_stmt_type',
     'isc_info_sql_get_plan', 'isc_info_sql_records', 'isc_info_sql_batch_fetch',
-    'isc_info_sql_relation_alias',
+    'isc_info_sql_relation_alias', 'isc_info_sql_explain_plan', 'isc_info_sql_stmt_flags',
 ]
 
 isc_info_sql_stmt_names = [
@@ -1369,7 +1370,17 @@ def _parse_trunc_sql_info(start, bytes, statement):
 
 
 def _database_parameter_block(bytes):
-    i = 0
+    n = _ord(bytes[0])
+    dpb_version = n
+
+    if dpb_version == 2:
+        print('\t', n, end='')
+        print('\t', isc_dpb_names[n], end='')
+        print()
+        i = 1
+    else:
+        i = 0
+
     while i < len(bytes):
         n = _ord(bytes[i])
         print('\t', n, end='')
@@ -1380,31 +1391,39 @@ def _database_parameter_block(bytes):
         else:
             s = isc_dpb_names[n]
         print('\t', s, end='')
-        if s in (
-            'isc_dpb_lc_ctype', 'isc_dpb_user_name', 'isc_dpb_password',
-            'isc_dpb_password_enc', 'isc_dpb_sql_role_name',
-            'isc_dpb_old_start_file', 'isc_dpb_set_db_charset',
-            'isc_dpb_working_directory', 'isc_dpb_gbak_attach',
-            'isc_dpb_process_name', 'isc_spb_process_name',
-            'isc_dpb_utf8_filename', 'isc_dpb_client_version',
-            'isc_dpb_remote_protocol', 'isc_dpb_host_name',
-            'isc_dpb_os_user', 'isc_dpb_auth_plugin_name',
-            'isc_dpb_auth_plugin_list', 'isc_dpb_specific_auth_data',
-        ):
-            l = _ord(bytes[i+1])
-            print('[', bytes[i+2:i+2+l], ']', end='')
-            i = i + 2 + l
-        elif s in (
-            'isc_dpb_dummy_packet_interval', 'isc_dpb_sql_dialect',
-            'isc_dpb_sweep', 'isc_dpb_connect_timeout', 'isc_dpb_page_size',
-            'isc_dpb_force_write', 'isc_dpb_overwrite', 'isc_dpb_process_id',
-            'isc_spb_process_id', 'isc_dpb_ext_call_depth',
-        ):
-            l = _ord(bytes[i+1])
-            print('', _bytes_to_int(bytes, i+2, l), end='')
-            i = i + 2 + l
+
+        if dpb_version == 1:
+            if s in (
+                'isc_dpb_lc_ctype', 'isc_dpb_user_name', 'isc_dpb_password',
+                'isc_dpb_password_enc', 'isc_dpb_sql_role_name',
+                'isc_dpb_old_start_file', 'isc_dpb_set_db_charset',
+                'isc_dpb_working_directory', 'isc_dpb_gbak_attach',
+                'isc_dpb_process_name', 'isc_spb_process_name',
+                'isc_dpb_utf8_filename', 'isc_dpb_client_version',
+                'isc_dpb_remote_protocol', 'isc_dpb_host_name',
+                'isc_dpb_os_user', 'isc_dpb_auth_plugin_name',
+                'isc_dpb_auth_plugin_list', 'isc_dpb_specific_auth_data',
+                'isc_dpb_auth_block',
+            ):
+                l = _ord(bytes[i+1])
+                print('[', bytes[i+2:i+2+l], ']', end='')
+                i = i + 2 + l
+            elif s in (
+                'isc_dpb_dummy_packet_interval', 'isc_dpb_sql_dialect',
+                'isc_dpb_sweep', 'isc_dpb_connect_timeout', 'isc_dpb_page_size',
+                'isc_dpb_force_write', 'isc_dpb_overwrite', 'isc_dpb_process_id',
+                'isc_spb_process_id', 'isc_dpb_ext_call_depth',
+            ):
+                l = _ord(bytes[i+1])
+                print('', _bytes_to_int(bytes, i+2, l), end='')
+                i = i + 2 + l
+            else:
+                i = i + 1
         else:
-            i = i + 1
+            l = _bytes_to_int(bytes, i+1, 4)
+            print('[', bytes[i+5:i+5+l], ']', end='')
+            i = i + 5 + l
+
         print()
 
 
@@ -1456,7 +1475,12 @@ def op_start_send_and_receive(sock):
 def op_response(sock):
     head = sock.recv(16)
     print('\thandle<', binascii.b2a_hex(head[0:4]), '>id<', binascii.b2a_hex(head[4:12]), '>', end='')
+
     nbytes = _bytes_to_bint32(head, 12)
+    if nbytes < 0:
+        nbytes = 65535 + nbytes
+    print('nbytes', nbytes)
+
     bs = _need_nbytes_align(sock, nbytes)
     print('Data len=%d' % (nbytes))
     hex_dump(bs)
